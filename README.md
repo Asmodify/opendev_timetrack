@@ -2,9 +2,9 @@
 
 The company's hour-tracking system for all staff, kept separate from the admin dashboard and the driver app.
 
-- **Workers** clock in and out from any browser, or let the desktop helper do it automatically. They see their own hours, export them, and request corrections.
-- **Managers** see who is working right now, team timesheets (office vs remote), and approve or reject corrections.
-- **Admins (HR)** add people one by one or import a CSV, set roles and managers, reset passwords, export payroll CSVs and read the audit log.
+- **Workers** clock in and out from any browser or the phone app, or let it happen automatically: the desktop helper tracks computer use, and the phone app checks them in when they arrive at an office. They see their day as a timeline, tag hours with projects, confirm automatic sessions, export their hours and request corrections.
+- **Managers** see who is working right now, team timesheets (office vs remote, hours by project, unconfirmed sessions), and approve or reject corrections.
+- **Admins (HR)** add people one by one or import a CSV, set roles and managers, manage projects and office areas, reset passwords, export payroll CSVs and read the audit log.
 
 ## How automatic tracking works
 
@@ -12,7 +12,9 @@ The company's hour-tracking system for all staff, kept separate from the admin d
 2. The desktop helper (`agent/timetrack_agent.py`) tells the server once a minute whether the keyboard or mouse was used in the last 5 minutes. No keystrokes, screenshots, apps, websites or GPS are collected.
 3. The server opens a session on the first activity and closes it after `IDLE_TIMEOUT_MINUTES` without activity (or when the helper stops), ending it at the last activity it saw.
 4. If the request comes from one of the `OFFICE_NETWORKS` addresses, the hours are tagged **Office**, otherwise **Remote**. Moving between them splits the session.
-5. Anything still open after `MAX_SHIFT_HOURS` is closed and flagged for a manager to review.
+5. With the phone app's office check-in on, arriving inside an office area starts an office session and leaving ends it. The phone sends only "arrive"/"leave", never coordinates. See [mobile/README.md](mobile/README.md).
+6. Automatic sessions start as **drafts**. As in Timely's timeline, the worker reviews their day, adds projects, and confirms it.
+7. Anything still open after `MAX_SHIFT_HOURS` is closed and flagged for a manager to review.
 
 > **Before rollout:** tracking employees' computer activity and work location is personal data. Give staff the written notice, follow your labour and data-protection rules, and get HR/legal sign-off. The consent step, the "what is never recorded" list and the audit log are built in for this, but they do not replace that review.
 
@@ -44,17 +46,21 @@ CSV with a header row: `email,name,employee_code,department,role,manager_email`.
 
 See [agent/build.md](agent/build.md) for packaging it as a Windows or macOS program and setting it up on each computer.
 
+## Phone app
+
+See [mobile/README.md](mobile/README.md) for building the Android and iOS app and how office check-in behaves in the background.
+
 ## Layout
 
 ```
 server/app/        FastAPI app: models, tracking rules, routers (auth, me, agent, team, admin)
 server/web/        Dashboard (plain HTML, CSS and JavaScript, no build step)
 agent/             Desktop helper (standard-library Python)
+mobile/            Flutter phone app (Android, iOS)
 tests/             API and tracking-rule tests
 ```
 
 ## Not yet included
 
-- Phone app with "near the office" geofencing (planned as a separate small app).
 - Single sign-on with company accounts; sign-in is email and password for now.
 - Database migrations (tables are created on first start; add Alembic before changing the schema in production).

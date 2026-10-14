@@ -52,8 +52,15 @@ def _bearer(request: Request) -> str:
 
 
 def current_user(request: Request, db: Session = Depends(get_db)) -> User:
+    token = _bearer(request)
+    if token.count(".") != 2:
+        # Not a JWT: the phone app signs in once and then uses its long-lived device token.
+        device = db.scalar(select(Device).where(Device.token_hash == hash_token(token)))
+        if not device or device.revoked or device.kind != "phone" or not device.user.active:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "This phone is no longer linked. Sign in again.")
+        return device.user
     try:
-        payload = jwt.decode(_bearer(request), settings.secret_key, algorithms=["HS256"])
+        payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
     except jwt.PyJWTError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Your session has expired. Sign in again.")
     user = db.get(User, int(payload["sub"]))

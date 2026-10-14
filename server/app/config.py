@@ -28,6 +28,8 @@ class Settings:
     # Any session still open after this long is closed and sent to a manager for review.
     max_shift_hours: int = int(os.getenv("MAX_SHIFT_HOURS", "14"))
     consent_version: str = os.getenv("CONSENT_VERSION", "2026-10")
+    # Browser origins allowed to call the API from another domain (e.g. a web build of the phone app). Usually empty.
+    cors_origins: list = field(default_factory=lambda: [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()])
     first_admin_email: str = os.getenv("FIRST_ADMIN_EMAIL", "")
     first_admin_password: str = os.getenv("FIRST_ADMIN_PASSWORD", "")
 

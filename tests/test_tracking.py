@@ -31,7 +31,7 @@ def test_agent_session_office_then_remote_then_idle(client, people):
     # Moving to home network closes the office session and opens a remote one.
     r = client.post("/api/agent/heartbeat", json={"active": True, "idle_seconds": 0}, headers={**dev, **HOME})
     assert r.json()["location"] == "remote"
-    entries = client.get("/api/me/entries", headers=w).json()
+    entries = [e for e in client.get("/api/me/entries", headers=w).json() if e["source"] == "agent"]
     assert [e["location"] for e in entries] == ["office", "remote"]
     assert entries[0]["running"] is False and entries[1]["running"] is True
 

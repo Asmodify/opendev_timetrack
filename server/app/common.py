@@ -47,8 +47,18 @@ def entry_out(e: TimeEntry) -> dict:
         "id": e.id, "user_id": e.user_id, "start": iso(e.start), "end": iso(e.end),
         "break_minutes": e.break_minutes, "location": e.location, "source": e.source,
         "status": e.status, "note": e.note, "running": e.end is None,
-        "worked_seconds": round(worked_seconds(e)),
+        "worked_seconds": round(worked_seconds(e)), "confirmed": e.confirmed,
+        "project_id": e.project_id, "project": project_out(e.project) if e.project else None,
     }
+
+
+def project_out(p) -> dict:
+    return {"id": p.id, "name": p.name, "client": p.client, "color": p.color, "active": p.active}
+
+
+def office_out(o) -> dict:
+    return {"id": o.id, "name": o.name, "latitude": o.latitude, "longitude": o.longitude,
+            "radius_m": o.radius_m, "active": o.active}
 
 
 def correction_out(c: Correction) -> dict:
@@ -74,7 +84,7 @@ def csv_response(filename: str, rows: list[list]) -> Response:
 
 def entry_rows(entries: list[TimeEntry], users: dict[int, User]) -> list[list]:
     rows = [["Employee code", "Name", "Department", "Date", "Start", "End", "Break (min)",
-             "Hours", "Location", "Source", "Status", "Note"]]
+             "Hours", "Location", "Project", "Source", "Confirmed", "Status", "Note"]]
     for e in entries:
         u = users.get(e.user_id)
         s = to_local(e.start)
@@ -82,5 +92,6 @@ def entry_rows(entries: list[TimeEntry], users: dict[int, User]) -> list[list]:
         rows.append([u.employee_code if u else "", u.name if u else e.user_id, u.department if u else "",
                      s.date().isoformat(), s.strftime("%H:%M"),
                      en.strftime("%H:%M") + (" (+1)" if en and en.date() != s.date() else "") if en else "running",
-                     e.break_minutes, hours(worked_seconds(e)), e.location, e.source, e.status, e.note])
+                     e.break_minutes, hours(worked_seconds(e)), e.location, e.project.name if e.project else "",
+                     e.source, "yes" if e.confirmed or e.source in ("web", "manual") else "no", e.status, e.note])
     return rows

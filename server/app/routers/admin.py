@@ -6,9 +6,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..common import iso, user_out
+from ..common import iso, office_out, project_out, user_out
 from ..db import get_db
-from ..models import ROLES, AuditLog, Device, User
+from ..models import ROLES, AuditLog, Device, OfficeLocation, Project, User
 from ..security import hash_password, require_role, temp_password
 from ..tracking import audit
 
@@ -35,6 +35,21 @@ class UserPatch(BaseModel):
     clear_manager: bool = False
     active: bool | None = None
     weekly_target_hours: float | None = Field(None, ge=0, le=100)
+
+
+class ProjectIn(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=128)
+    client: str | None = Field(None, max_length=128)
+    color: str | None = Field(None, pattern="^#[0-9a-fA-F]{6}$")
+    active: bool | None = None
+
+
+class OfficeIn(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=128)
+    latitude: float | None = Field(None, ge=-90, le=90)
+    longitude: float | None = Field(None, ge=-180, le=180)
+    radius_m: int | None = Field(None, ge=50, le=2000)
+    active: bool | None = None
 
 
 class ImportIn(BaseModel):
@@ -159,3 +174,63 @@ def audit_log(limit: int = 200, _: User = Depends(admin), db: Session = Depends(
     names = {u.id: u.name for u in db.scalars(select(User))}
     return [{"at": iso(r.at), "actor": names.get(r.actor_id), "action": r.action,
              "target": names.get(r.target_user_id), "detail": r.detail} for r in rows]
+
+
+def _apply(obj, body: BaseModel) -> None:
+    for field, value in body.model_dump(exclude_none=True).items():
+        setattr(obj, field, value)
+
+
+@router.get("/projects")
+def list_projects(_: User = Depends(admin), db: Session = Depends(get_db)):
+    return [project_out(p) for p in db.scalars(select(Project).order_by(Project.active.desc(), Project.name))]
+
+
+@router.post("/projects")
+def create_project(body: ProjectIn, actor: User = Depends(admin), db: Session = Depends(get_db)):
+    if not body.name:
+        raise HTTPException(400, "Give the project a name.")
+    p = Project(name=body.name.strip(), client=(body.client or "").strip() or None, color=body.color or "#2f5d9e")
+    db.add(p)
+    audit(db, actor, "project_created", name=p.name)
+    db.commit()
+    return project_out(p)
+
+
+@router.patch("/projects/{project_id}")
+def update_project(project_id: int, body: ProjectIn, actor: User = Depends(admin), db: Session = Depends(get_db)):
+    p = db.get(Project, project_id)
+    if not p:
+        raise HTTPException(404, "Project not found.")
+    _apply(p, body)
+    audit(db, actor, "project_updated", name=p.name, changes=body.model_dump(exclude_none=True))
+    db.commit()
+    return project_out(p)
+
+
+@router.get("/offices")
+def list_offices(_: User = Depends(admin), db: Session = Depends(get_db)):
+    return [office_out(o) for o in db.scalars(select(OfficeLocation).order_by(OfficeLocation.name))]
+
+
+@router.post("/offices")
+def create_office(body: OfficeIn, actor: User = Depends(admin), db: Session = Depends(get_db)):
+    if not body.name or body.latitude is None or body.longitude is None:
+        raise HTTPException(400, "Give the office a name, latitude and longitude.")
+    o = OfficeLocation(name=body.name.strip(), latitude=body.latitude, longitude=body.longitude,
+                       radius_m=body.radius_m or 150)
+    db.add(o)
+    audit(db, actor, "office_created", name=o.name)
+    db.commit()
+    return office_out(o)
+
+
+@router.patch("/offices/{office_id}")
+def update_office(office_id: int, body: OfficeIn, actor: User = Depends(admin), db: Session = Depends(get_db)):
+    o = db.get(OfficeLocation, office_id)
+    if not o:
+        raise HTTPException(404, "Office not found.")
+    _apply(o, body)
+    audit(db, actor, "office_updated", name=o.name, changes=body.model_dump(exclude_none=True))
+    db.commit()
+    return office_out(o)

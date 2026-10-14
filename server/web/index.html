@@ -163,6 +163,7 @@
         </div>
       </div>
       <div class="tablewrap"><table id="teamTable"></table></div>
+      <div id="projTotals" class="list"></div>
       <div id="personDetail" hidden>
         <div class="cardhead"><h3 id="personName"></h3><button class="link" id="personClose">Close</button></div>
         <div class="tablewrap"><table id="personTable"></table></div>
@@ -197,6 +198,36 @@
         <p class="muted small">Paste a CSV with a header row: <code>email,name,employee_code,department,role,manager_email</code>. Roles: worker, manager, admin.</p>
         <textarea id="importText" rows="6" placeholder="email,name,employee_code,department,role,manager_email&#10;bat@company.mn,Bat Erdene,E001,Engineering,worker,dorj@company.mn"></textarea>
         <div class="row-btns"><button class="btn primary" id="importBtn">Import</button><label class="btn small filebtn">Load CSV file<input type="file" id="importFile" accept=".csv,text/csv" hidden></label></div>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <h2>Projects</h2>
+        <p class="muted small">Workers tag their hours with these, on the web and in the phone app.</p>
+        <form id="projForm" class="row-btns">
+          <input id="pName" placeholder="Project name" required aria-label="Project name" style="flex:2 1 160px">
+          <input id="pClient" placeholder="Client (optional)" aria-label="Client" style="flex:1 1 120px">
+          <input id="pColor" type="color" value="#2f5d9e" aria-label="Colour" style="width:52px;padding:2px">
+          <button class="btn primary" type="submit">Add</button>
+        </form>
+        <div id="projList" class="list"></div>
+      </div>
+      <div class="card">
+        <h2>Office areas</h2>
+        <p class="muted small">The phone app starts a worker's hours when they enter one of these circles. Find the coordinates by long-pressing the office in Google Maps.</p>
+        <form id="officeForm" class="stack">
+          <div class="row3">
+            <label>Name<input id="oName" required placeholder="Head office"></label>
+            <label>Radius (m)<input id="oRadius" type="number" min="50" max="2000" value="150"></label>
+          </div>
+          <div class="row3">
+            <label>Latitude<input id="oLat" type="number" step="any" required placeholder="47.9185"></label>
+            <label>Longitude<input id="oLon" type="number" step="any" required placeholder="106.9176"></label>
+          </div>
+          <p class="err" id="officeErr" hidden></p>
+          <button class="btn primary" type="submit">Add office area</button>
+        </form>
+        <div id="officeList" class="list"></div>
       </div>
     </div>
     <div class="card" id="passwordsCard" hidden>

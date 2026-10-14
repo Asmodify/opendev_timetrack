@@ -42,6 +42,7 @@ const dayName = (dt) => dt.toLocaleDateString(undefined, { weekday: "short", day
 function weekStart(offset) { const t = new Date(); t.setHours(0, 0, 0, 0); t.setDate(t.getDate() - ((t.getDay() + 6) % 7) + offset * 7); return t; }
 function addDays(dt, n) { const x = new Date(dt); x.setDate(x.getDate() + n); return x; }
 const LOC = { office: "Office", remote: "Remote" };
+const SOURCES = { agent: "Computer", phone: "Arrived at office", web: "Clock button", manual: "Correction" };
 
 /* ---------- routing ---------- */
 const VIEWS = ["login", "password", "me", "team", "people", "audit"];
@@ -108,6 +109,7 @@ async function loadMine() {
   $("#pairBtn").disabled = !u.consent;
   $("#herePill").textContent = state.me.here === "office" ? "On office network" : "Working remotely";
   $("#herePill").className = "pill " + state.me.here;
+  state.projects = await api("/api/me/projects").catch(() => []);
   const [summary, entries, corrections, devices] = await Promise.all([
     api("/api/me/summary"), loadMyEntries(), api("/api/me/corrections"), api("/api/me/devices"),
   ]).catch((e) => { toast(e.message); return []; });
@@ -156,12 +158,15 @@ async function loadMyEntries() {
   const rows = await api(`/api/me/entries?start=${ymd(ws)}&end=${ymd(we)}`);
   const t = $("#myTable");
   if (!rows.length) { t.innerHTML = `<tr><td><div class="empty">No hours in this week yet.</div></td></tr>`; return rows; }
-  t.innerHTML = `<thead><tr><th>Day</th><th>Time</th><th>Where</th><th>How</th><th class="n">Break</th><th class="n">Hours</th><th>Note</th><th></th></tr></thead><tbody>` +
+  const projOpts = (e) => `<option value="">No project</option>` + (state.projects || []).map((p) => `<option value="${p.id}"${p.id === e.project_id ? " selected" : ""}>${esc(p.name)}</option>`).join("");
+  t.innerHTML = `<thead><tr><th>Day</th><th>Time</th><th>Where</th><th>How</th><th>Project</th><th class="n">Break</th><th class="n">Hours</th><th>Note</th><th></th></tr></thead><tbody>` +
     rows.slice().reverse().map((e) => {
       const s = d(e.start), en = e.end ? d(e.end) : null;
+      const draft = ["agent", "phone"].includes(e.source) && !e.confirmed && !e.running;
       return `<tr><td>${dayName(s)}</td><td class="mono">${hm(s)} – ${en ? hm(en) : "now"}</td>
         <td><span class="pill ${e.location}">${LOC[e.location]}</span></td>
-        <td class="small muted">${{ agent: "Automatic", web: "Clock button", manual: "Correction" }[e.source] || e.source}${e.status === "review" ? ' <span class="pill warn">Review</span>' : ""}</td>
+        <td class="small muted">${SOURCES[e.source] || e.source}${e.status === "review" ? ' <span class="pill warn">Review</span>' : ""}${draft ? ` <span class="pill warn">Draft</span> <button class="link small" data-confirm-entry="${e.id}">Confirm</button>` : ""}</td>
+        <td><select data-proj-for="${e.id}" aria-label="Project">${projOpts(e)}</select></td>
         <td class="n mono">${e.break_minutes ? e.break_minutes + "m" : "–"}</td><td class="n mono">${dur(e.worked_seconds)}</td>
         <td class="small">${esc(e.note)}</td>
         <td>${e.running ? "" : `<button class="link small" data-fix="${e.id}">Fix</button> <button class="link small" data-remove="${e.id}">Remove</button>`}</td></tr>`;
@@ -169,6 +174,11 @@ async function loadMyEntries() {
   t._rows = rows;
   return rows;
 }
+$("#myTable").addEventListener("change", async (ev) => {
+  const id = ev.target.dataset.projFor; if (!id) return;
+  const v = ev.target.value;
+  try { await api("/api/me/entries/" + id, { method: "PATCH", body: v ? { project_id: Number(v) } : { clear_project: true } }); toast("Project saved"); } catch (e) { toast(e.message); }
+});
 $("#myPrev").addEventListener("click", () => { state.weekOffset--; loadMyEntries().catch((e) => toast(e.message)); });
 $("#myNext").addEventListener("click", () => { if (state.weekOffset < 0) { state.weekOffset++; loadMyEntries().catch((e) => toast(e.message)); } });
 $("#myExport").addEventListener("click", () => { const ws = weekStart(state.weekOffset); download(`/api/me/export.csv?start=${ymd(ws)}&end=${ymd(addDays(ws, 6))}`); });
@@ -182,7 +192,9 @@ function resetCorrection() {
   showErr($("#corrErr"), "");
 }
 $("#corrCancel").addEventListener("click", resetCorrection);
-$("#myTable").addEventListener("click", (ev) => {
+$("#myTable").addEventListener("click", async (ev) => {
+  const conf = ev.target.closest("[data-confirm-entry]");
+  if (conf) { try { await api("/api/me/entries/" + conf.dataset.confirmEntry, { method: "PATCH", body: { confirmed: true } }); toast("Confirmed"); loadMyEntries(); } catch (e) { toast(e.message); } return; }
   const fix = ev.target.closest("[data-fix]"), rm = ev.target.closest("[data-remove]");
   const id = Number((fix || rm)?.dataset.fix || (fix || rm)?.dataset.remove);
   const e = ($("#myTable")._rows || []).find((x) => x.id === id);
@@ -257,10 +269,12 @@ async function loadTeam() {
     $("#liveCount").textContent = live.working + " of " + live.total + " working";
     $("#liveGrid").innerHTML = live.people.map((p) => `<div class="person${p.working ? "" : " off"}"><b>${esc(p.user.name)}</b>
       <span class="small muted">${esc(p.user.department || "")}</span>
-      <span class="small">${p.working ? `<span class="pill ${p.location}">${LOC[p.location]}</span> since ${hm(d(p.since))}${p.source === "agent" ? " · auto" : ""}` : "Not working"}</span></div>`).join("") || `<div class="empty">No one on your team yet.</div>`;
+      <span class="small">${p.working ? `<span class="pill ${p.location}">${LOC[p.location]}</span> since ${hm(d(p.since))}${["agent", "phone"].includes(p.source) ? " · auto" : ""}` : "Not working"}</span></div>`).join("") || `<div class="empty">No one on your team yet.</div>`;
     const sel = $("#tDept"), cur = sel.value;
     sel.innerHTML = `<option value="">All</option>` + summary.departments.map((x) => `<option${x === cur ? " selected" : ""}>${esc(x)}</option>`).join("");
     renderTeamTable(summary.rows);
+    const projTotal = summary.projects.reduce((a, p) => a + p.seconds, 0) || 1;
+    $("#projTotals").innerHTML = summary.projects.length ? `<h3>By project</h3>` + summary.projects.map((p) => `<div class="item"><div class="top"><span><i class="sw" style="background:${esc(p.color)}"></i>${esc(p.name)}</span><b class="mono">${dur(p.seconds)}</b></div><div class="bar-mini"><span style="width:${(p.seconds / projTotal) * 100}%;background:${esc(p.color)}"></span></div></div>`).join("") : "";
     $("#pendingCount").hidden = !pending.length; $("#pendingCount").textContent = pending.length + " waiting";
     $("#pendingList").innerHTML = pending.length ? pending.map((c) => `<div class="item"><div class="top"><b>${esc(c.user_name)}: ${esc(correctionText(c))}</b>
       <span class="row-btns"><button class="btn small primary" data-approve="${c.id}">Approve</button><button class="btn small danger" data-reject="${c.id}">Reject</button></span></div>
@@ -274,7 +288,7 @@ function renderTeamTable(rows) {
       return `<tr class="clickable" data-person="${r.user.id}" data-name="${esc(r.user.name)}"><td><b>${esc(r.user.name)}</b></td><td class="mono small">${esc(r.user.employee_code || "")}</td><td>${esc(r.user.department || "")}</td>
       <td class="n mono">${dur(r.office_seconds)}</td><td class="n mono">${dur(r.remote_seconds)}</td><td class="n mono"><b>${dur(r.total_seconds)}</b></td>
       <td class="n mono muted">${dur(r.target_seconds)}</td><td class="n mono">${r.days_worked}</td>
-      <td><div class="bar-mini"><span class="bg-office" style="width:${(r.office_seconds / tot) * 100}%"></span><span class="bg-remote" style="width:${(r.remote_seconds / tot) * 100}%"></span></div>${r.needs_review ? '<span class="pill warn">' + r.needs_review + " to review</span>" : ""}</td></tr>`;
+      <td>${r.unconfirmed ? '<span class="pill">' + r.unconfirmed + " unconfirmed</span>" : ""}<div class="bar-mini"><span class="bg-office" style="width:${(r.office_seconds / tot) * 100}%"></span><span class="bg-remote" style="width:${(r.remote_seconds / tot) * 100}%"></span></div>${r.needs_review ? '<span class="pill warn">' + r.needs_review + " to review</span>" : ""}</td></tr>`;
     }).join("") + "</tbody>" : `<tr><td><div class="empty">No people in this view.</div></td></tr>`;
 }
 ["#tFrom", "#tTo", "#tDept"].forEach((s) => $(s).addEventListener("change", loadTeam));
@@ -287,7 +301,7 @@ $("#teamTable").addEventListener("click", async (ev) => {
     $("#personName").textContent = tr.dataset.name; $("#personDetail").hidden = false;
     $("#personTable").innerHTML = rows.length ? `<thead><tr><th>Day</th><th>Time</th><th>Where</th><th>How</th><th class="n">Hours</th><th>Note</th></tr></thead><tbody>` +
       rows.map((e) => `<tr><td>${dayName(d(e.start))}</td><td class="mono">${hm(d(e.start))} – ${e.end ? hm(d(e.end)) : "now"}</td><td><span class="pill ${e.location}">${LOC[e.location]}</span></td>
-      <td class="small muted">${{ agent: "Automatic", web: "Clock button", manual: "Correction" }[e.source]}${e.status === "review" ? ' <span class="pill warn">Review</span>' : ""}</td><td class="n mono">${dur(e.worked_seconds)}</td><td class="small">${esc(e.note)}</td></tr>`).join("") + "</tbody>"
+      <td class="small muted">${SOURCES[e.source] || e.source}${e.project ? " · " + esc(e.project.name) : ""}${e.status === "review" ? ' <span class="pill warn">Review</span>' : ""}</td><td class="n mono">${dur(e.worked_seconds)}</td><td class="small">${esc(e.note)}</td></tr>`).join("") + "</tbody>"
       : `<tr><td><div class="empty">No entries in this range.</div></td></tr>`;
     $("#personDetail").scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (e) { toast(e.message); }
@@ -303,6 +317,7 @@ $("#pendingList").addEventListener("click", async (ev) => {
 /* ---------- people (admin) ---------- */
 async function loadPeople() {
   try { state.users = await api("/api/admin/users"); } catch (e) { toast(e.message); return; }
+  loadProjectsAdmin(); loadOfficesAdmin();
   const managers = state.users.filter((u) => u.active && u.role !== "worker");
   $("#aManager").innerHTML = `<option value="">None</option>` + managers.map((u) => `<option value="${esc(u.email)}">${esc(u.name)}</option>`).join("");
   $("#deptList").innerHTML = [...new Set(state.users.map((u) => u.department).filter(Boolean))].map((x) => `<option value="${esc(x)}">`).join("");
@@ -366,10 +381,46 @@ $("#pwExport").addEventListener("click", () => {
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "temporary-passwords.csv"; a.click();
 });
 
+async function loadProjectsAdmin() {
+  try {
+    const rows = await api("/api/admin/projects");
+    $("#projList").innerHTML = rows.length ? rows.map((p) => `<div class="item"><div class="top"><span><i class="sw" style="background:${esc(p.color)}"></i><b>${esc(p.name)}</b>${p.client ? ' <span class="muted small">' + esc(p.client) + "</span>" : ""}</span>
+      <button class="link small" data-proj-toggle="${p.id}" data-active="${p.active}">${p.active ? "Archive" : "Restore"}</button></div></div>`).join("") : `<div class="empty small">No projects yet.</div>`;
+  } catch (e) { toast(e.message); }
+}
+$("#projForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try { await api("/api/admin/projects", { method: "POST", body: { name: $("#pName").value, client: $("#pClient").value || null, color: $("#pColor").value } }); $("#pName").value = $("#pClient").value = ""; toast("Project added"); loadProjectsAdmin(); } catch (e) { toast(e.message); }
+});
+$("#projList").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("[data-proj-toggle]"); if (!b) return;
+  try { await api("/api/admin/projects/" + b.dataset.projToggle, { method: "PATCH", body: { active: b.dataset.active !== "true" } }); loadProjectsAdmin(); } catch (e) { toast(e.message); }
+});
+async function loadOfficesAdmin() {
+  try {
+    const rows = await api("/api/admin/offices");
+    $("#officeList").innerHTML = rows.length ? rows.map((o) => `<div class="item"><div class="top"><b>${esc(o.name)}</b><button class="link small" data-office-toggle="${o.id}" data-active="${o.active}">${o.active ? "Turn off" : "Turn on"}</button></div>
+      <span class="small muted mono">${o.latitude.toFixed(5)}, ${o.longitude.toFixed(5)} · ${o.radius_m} m${o.active ? "" : " · off"}</span>
+      <a class="small" href="https://www.google.com/maps?q=${o.latitude},${o.longitude}" target="_blank" rel="noopener">Check on map</a></div>`).join("") : `<div class="empty small">No office areas yet. Add one so the phone app can check people in.</div>`;
+  } catch (e) { toast(e.message); }
+}
+$("#officeForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    await api("/api/admin/offices", { method: "POST", body: { name: $("#oName").value, latitude: Number($("#oLat").value), longitude: Number($("#oLon").value), radius_m: Number($("#oRadius").value) || 150 } });
+    $("#officeForm").reset(); showErr($("#officeErr"), ""); toast("Office area added"); loadOfficesAdmin();
+  } catch (e) { showErr($("#officeErr"), e.message); }
+});
+$("#officeList").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("[data-office-toggle]"); if (!b) return;
+  try { await api("/api/admin/offices/" + b.dataset.officeToggle, { method: "PATCH", body: { active: b.dataset.active !== "true" } }); loadOfficesAdmin(); } catch (e) { toast(e.message); }
+});
+
 /* ---------- audit ---------- */
-const ACTIONS = { consent_given: "Accepted automatic tracking", consent_withdrawn: "Withdrew automatic tracking", device_paired: "Linked a computer", device_removed: "Unlinked a computer",
+const ACTIONS = { consent_given: "Accepted automatic tracking", consent_withdrawn: "Withdrew automatic tracking", device_paired: "Linked a device", device_removed: "Unlinked a device",
   correction_requested: "Requested a correction", correction_approved: "Approved a correction", correction_rejected: "Rejected a correction", export: "Exported a timesheet",
-  user_created: "Created an account", user_updated: "Changed an account", password_reset: "Reset a password", password_changed: "Changed own password" };
+  user_created: "Created an account", user_updated: "Changed an account", password_reset: "Reset a password", password_changed: "Changed own password", project_created: "Added a project", project_updated: "Changed a project",
+  office_created: "Added an office area", office_updated: "Changed an office area" };
 async function loadAudit() {
   try {
     const rows = await api("/api/admin/audit");

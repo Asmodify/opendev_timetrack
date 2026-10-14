@@ -7,9 +7,9 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import get_db
-from ..models import Device, PairingCode, utcnow
+from ..models import Device, OfficeLocation, PairingCode, utcnow
 from ..security import current_device, hash_token
-from ..tracking import audit, client_ip, close_entry, heartbeat, open_entry
+from ..tracking import audit, client_ip, close_entry, heartbeat, open_entry, presence
 
 router = APIRouter(prefix="/api/agent", tags=["desktop helper"])
 
@@ -23,6 +23,11 @@ class PairIn(BaseModel):
 class HeartbeatIn(BaseModel):
     active: bool
     idle_seconds: int = Field(0, ge=0, le=7 * 86400)
+
+
+class PresenceIn(BaseModel):
+    event: str = Field(pattern="^(arrive|leave)$")
+    office_id: int
 
 
 class StopIn(BaseModel):
@@ -70,3 +75,17 @@ def agent_stop(body: StopIn, device: Device = Depends(current_device), db: Sessi
         return {"state": "stopped", "reason": body.reason or "stop"}
     db.commit()
     return {"state": "idle"}
+
+
+@router.post("/presence")
+def phone_presence(body: PresenceIn, device: Device = Depends(current_device), db: Session = Depends(get_db)):
+    """The phone app entered or left an office area."""
+    if device.kind != "phone":
+        raise HTTPException(400, "Only the phone app reports office arrivals.")
+    _require_consent(device)
+    office = db.get(OfficeLocation, body.office_id)
+    if not office or not office.active:
+        raise HTTPException(404, "That office no longer exists. Reopen the app to refresh the office list.")
+    result = presence(db, device, body.event, office.name)
+    db.commit()
+    return result

@@ -37,10 +37,11 @@ def open_entry(db: Session, user_id: int) -> TimeEntry | None:
 
 
 def start_entry(db: Session, user: User, location: str, source: str, device: Device | None = None,
-                at: datetime | None = None, note: str = "") -> TimeEntry:
+                at: datetime | None = None, note: str = "", project_id: int | None = None) -> TimeEntry:
     at = at or utcnow()
     entry = TimeEntry(user_id=user.id, start=at, location=location, source=source,
-                      device_id=device.id if device else None, last_activity_at=at, note=note)
+                      device_id=device.id if device else None, last_activity_at=at, note=note,
+                      project_id=project_id, confirmed=source == "web")
     db.add(entry)
     return entry
 
@@ -90,6 +91,31 @@ def heartbeat(db: Session, device: Device, ip: str, active: bool, idle_seconds: 
         return {"state": "working", "location": entry.location, "entry_id": entry.id,
                 "since": entry.start.isoformat() + "Z"}
     return {"state": "idle"}
+
+
+def presence(db: Session, device: Device, event: str, office_name: str) -> dict:
+    """Called by the phone app when it enters or leaves an office area.
+
+    The phone sends only the event, never coordinates.
+    """
+    user = device.user
+    device.last_seen_at = utcnow()
+    entry = open_entry(db, user.id)
+    if event == "arrive":
+        if entry and entry.location == "office":
+            return {"state": "working", "location": "office", "entry_id": entry.id}
+        if entry and entry.source in ("agent", "phone"):
+            close_entry(entry)  # e.g. was working remotely on the laptop, now walked into the office
+        elif entry:
+            return {"state": "manual", "location": entry.location, "entry_id": entry.id}
+        entry = start_entry(db, user, "office", "phone", device, note=f"Arrived at {office_name}")
+        db.flush()
+        return {"state": "working", "location": "office", "entry_id": entry.id}
+    # leave
+    if entry and entry.source == "phone":
+        close_entry(entry)
+        return {"state": "stopped", "reason": "left office"}
+    return {"state": "idle" if not entry else "manual"}
 
 
 def close_stale(db: Session) -> int:

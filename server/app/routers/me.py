@@ -6,11 +6,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..common import (correction_out, csv_response, date_range, entry_out, entry_rows, iso, to_utc_naive,
-                      user_out)
+from ..common import (correction_out, csv_response, date_range, entry_out, entry_rows, iso, office_out,
+                      project_out, to_utc_naive, user_out)
 from ..config import settings
 from ..db import get_db
-from ..models import LOCATIONS, Correction, Device, PairingCode, TimeEntry, User, utcnow
+from ..models import LOCATIONS, Correction, Device, OfficeLocation, PairingCode, Project, TimeEntry, User, utcnow
 from ..security import current_user, hash_token
 from ..tracking import (audit, client_ip, close_entry, entries_between, local_day_bounds, local_today,
                         location_for, open_entry, start_entry, week_start, worked_seconds)
@@ -24,6 +24,23 @@ class ConsentIn(BaseModel):
 
 class ClockIn(BaseModel):
     note: str = Field("", max_length=300)
+    project_id: int | None = None
+
+
+class EntryPatch(BaseModel):
+    project_id: int | None = None
+    clear_project: bool = False
+    note: str | None = Field(None, max_length=300)
+    confirmed: bool | None = None
+
+
+class ConfirmDayIn(BaseModel):
+    date: date
+
+
+class PhoneIn(BaseModel):
+    device_name: str = Field(min_length=1, max_length=128)
+    platform: str = Field("", max_length=64)
 
 
 class CorrectionIn(BaseModel):
@@ -74,7 +91,8 @@ def clock_in(body: ClockIn, request: Request, user: User = Depends(current_user)
             close_entry(entry)
         else:
             raise HTTPException(409, "You're already clocked in.")
-    entry = start_entry(db, user, location_for(client_ip(request)), "web", note=body.note.strip())
+    entry = start_entry(db, user, location_for(client_ip(request)), "web", note=body.note.strip(),
+                        project_id=_project_id(db, body.project_id))
     db.commit()
     return entry_out(entry)
 
@@ -87,6 +105,68 @@ def clock_out(user: User = Depends(current_user), db: Session = Depends(get_db))
     close_entry(entry)
     db.commit()
     return entry_out(entry)
+
+
+def _project_id(db: Session, project_id: int | None) -> int | None:
+    if project_id is None:
+        return None
+    p = db.get(Project, project_id)
+    if not p or not p.active:
+        raise HTTPException(400, "That project is not available.")
+    return p.id
+
+
+@router.get("/projects")
+def projects(_: User = Depends(current_user), db: Session = Depends(get_db)):
+    return [project_out(p) for p in db.scalars(select(Project).where(Project.active.is_(True)).order_by(Project.name))]
+
+
+@router.get("/offices")
+def offices(_: User = Depends(current_user), db: Session = Depends(get_db)):
+    return [office_out(o) for o in db.scalars(select(OfficeLocation).where(OfficeLocation.active.is_(True)))]
+
+
+@router.patch("/entries/{entry_id}")
+def update_entry(entry_id: int, body: EntryPatch, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Workers can tag, annotate and confirm their own entries. Changing times goes through a correction."""
+    e = db.get(TimeEntry, entry_id)
+    if not e or e.user_id != user.id:
+        raise HTTPException(404, "That entry was not found.")
+    if body.clear_project:
+        e.project_id = None
+    elif body.project_id is not None:
+        e.project_id = _project_id(db, body.project_id)
+    if body.note is not None:
+        e.note = body.note.strip()
+    if body.confirmed is not None:
+        if body.confirmed and e.end is None:
+            raise HTTPException(400, "Clock out before confirming this session.")
+        e.confirmed = body.confirmed
+    db.commit()
+    return entry_out(e)
+
+
+@router.post("/confirm-day")
+def confirm_day(body: ConfirmDayIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    a, b = local_day_bounds(body.date)
+    rows = [e for e in entries_between(db, [user.id], a, b) if e.end is not None and not e.confirmed]
+    for e in rows:
+        e.confirmed = True
+    db.commit()
+    return {"confirmed": len(rows)}
+
+
+@router.post("/phone")
+def register_phone(body: PhoneIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """The phone app calls this right after sign-in and keeps the returned token instead of a short session."""
+    token = secrets.token_urlsafe(32)
+    d = Device(user_id=user.id, name=body.device_name.strip(), platform=body.platform, kind="phone",
+               token_hash=hash_token(token), last_seen_at=utcnow())
+    db.add(d)
+    db.flush()
+    audit(db, user, "device_paired", user, device=d.name, kind="phone")
+    db.commit()
+    return {"token": token, "device_id": d.id}
 
 
 @router.get("/summary")
@@ -184,7 +264,7 @@ def pairing_code(user: User = Depends(current_user), db: Session = Depends(get_d
 @router.get("/devices")
 def my_devices(user: User = Depends(current_user), db: Session = Depends(get_db)):
     rows = db.scalars(select(Device).where(Device.user_id == user.id, Device.revoked.is_(False)))
-    return [{"id": d.id, "name": d.name, "platform": d.platform, "created_at": iso(d.created_at),
+    return [{"id": d.id, "name": d.name, "platform": d.platform, "kind": d.kind, "created_at": iso(d.created_at),
              "last_seen_at": iso(d.last_seen_at)} for d in rows]
 
 

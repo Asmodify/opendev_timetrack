@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
@@ -54,6 +55,9 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title=f"{settings.company_name} Time Tracking", lifespan=lifespan)
 for r in (auth.router, me.router, agent.router, team.router, admin.router):
     app.include_router(r)
+if settings.cors_origins:
+    app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"],
+                       allow_headers=["Authorization", "Content-Type"])
 
 
 @app.middleware("http")

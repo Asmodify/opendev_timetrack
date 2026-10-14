@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..common import correction_out, csv_response, date_range, entry_out, entry_rows, hours, iso, user_out
 from ..db import get_db
-from ..models import Correction, Device, TimeEntry, User, utcnow
+from ..models import Correction, Device, Project, TimeEntry, User, utcnow
 from ..security import require_role
 from ..tracking import (audit, entries_between, local_day_bounds, open_entry, to_local, visible_users,
                         worked_seconds)
@@ -45,13 +45,16 @@ def live(viewer: User = Depends(manager), db: Session = Depends(get_db)):
 def _summary(db: Session, viewer: User, start: date | None, end: date | None, department: str | None):
     s, e, a, b = date_range(start, end)
     users = {k: u for k, u in _scope(db, viewer).items() if u.active and (not department or u.department == department)}
-    totals = defaultdict(lambda: {"office": 0.0, "remote": 0.0, "days": set(), "review": 0})
+    totals = defaultdict(lambda: {"office": 0.0, "remote": 0.0, "days": set(), "review": 0, "unconfirmed": 0})
+    by_project: dict = defaultdict(float)
     for entry in entries_between(db, list(users), a, b):
         secs = worked_seconds(entry, a, b)
         t = totals[entry.user_id]
         t[entry.location] += secs
         t["days"].add(to_local(entry.start).date())
         t["review"] += entry.status == "review"
+        t["unconfirmed"] += not entry.confirmed and entry.end is not None
+        by_project[entry.project_id] += secs
     weeks = ((e - s).days + 1) / 7
     rows = []
     for u in users.values():
@@ -60,17 +63,23 @@ def _summary(db: Session, viewer: User, start: date | None, end: date | None, de
         rows.append({"user": {"id": u.id, "name": u.name, "department": u.department, "employee_code": u.employee_code},
                      "office_seconds": round(t["office"]), "remote_seconds": round(t["remote"]),
                      "total_seconds": round(total), "days_worked": len(t["days"]),
-                     "target_seconds": round(u.weekly_target_hours * 3600 * weeks), "needs_review": t["review"]})
+                     "target_seconds": round(u.weekly_target_hours * 3600 * weeks), "needs_review": t["review"],
+                     "unconfirmed": t["unconfirmed"]})
     rows.sort(key=lambda r: r["user"]["name"])
-    return s, e, rows
+    names = {p.id: p for p in db.scalars(select(Project))}
+    projects = sorted(({"id": pid, "name": names[pid].name if pid in names else "No project",
+                        "color": names[pid].color if pid in names else "#8a9a94", "seconds": round(sec)}
+                       for pid, sec in by_project.items()), key=lambda x: -x["seconds"])
+    return s, e, rows, projects
 
 
 @router.get("/summary")
 def summary(start: date | None = None, end: date | None = None, department: str | None = None,
             viewer: User = Depends(manager), db: Session = Depends(get_db)):
-    s, e, rows = _summary(db, viewer, start, end, department)
+    s, e, rows, projects = _summary(db, viewer, start, end, department)
     departments = sorted({u.department for u in _scope(db, viewer).values() if u.department})
-    return {"start": s.isoformat(), "end": e.isoformat(), "rows": rows, "departments": departments}
+    return {"start": s.isoformat(), "end": e.isoformat(), "rows": rows, "departments": departments,
+            "projects": projects}
 
 
 @router.get("/export.csv")
@@ -81,7 +90,7 @@ def export(kind: str = "summary", start: date | None = None, end: date | None = 
         users = {k: u for k, u in _scope(db, viewer).items() if not department or u.department == department}
         rows = entry_rows(entries_between(db, list(users), a, b), users)
     else:
-        s, e, data = _summary(db, viewer, start, end, department)
+        s, e, data, _ = _summary(db, viewer, start, end, department)
         rows = [["Employee code", "Name", "Department", "Office hours", "Remote hours", "Total hours",
                  "Target hours", "Days worked", "Entries to review"]]
         rows += [[r["user"]["employee_code"] or "", r["user"]["name"], r["user"]["department"] or "",
@@ -125,7 +134,7 @@ def approve(cid: int, body: ReviewIn, viewer: User = Depends(manager), db: Sessi
     c = _review(db, viewer, cid)
     if c.kind == "add":
         db.add(TimeEntry(user_id=c.user_id, start=c.start, end=c.end, break_minutes=c.break_minutes,
-                         location=c.location or "remote", source="manual", note=c.reason))
+                         location=c.location or "remote", source="manual", note=c.reason, confirmed=True))
     else:
         entry = db.get(TimeEntry, c.entry_id or 0)
         if not entry:
