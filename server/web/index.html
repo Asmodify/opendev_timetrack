@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Time Tracking</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header class="bar" id="bar" hidden>
+  <div class="brand"><span class="logo" aria-hidden="true">◷</span><span id="companyName">Time Tracking</span></div>
+  <nav id="nav">
+    <a href="#me" data-view="me">My hours</a>
+    <a href="#team" data-view="team" data-role="manager admin">Team</a>
+    <a href="#people" data-view="people" data-role="admin">People</a>
+    <a href="#audit" data-view="audit" data-role="admin">Audit log</a>
+  </nav>
+  <div class="who"><span id="whoName"></span><button class="link" id="logout">Sign out</button></div>
+</header>
+
+<main>
+  <!-- sign in -->
+  <section id="v-login" class="view narrow" hidden>
+    <h1>Sign in</h1>
+    <form id="loginForm" class="stack">
+      <label>Work email<input id="loginEmail" type="email" autocomplete="username" required></label>
+      <label>Password<input id="loginPassword" type="password" autocomplete="current-password" required></label>
+      <p class="err" id="loginErr" hidden></p>
+      <button class="btn primary" type="submit">Sign in</button>
+    </form>
+    <p class="muted small">Forgot your password? Ask an admin to reset it.</p>
+  </section>
+
+  <!-- forced password change -->
+  <section id="v-password" class="view narrow" hidden>
+    <h1>Choose your password</h1>
+    <p class="muted">You signed in with a temporary password. Pick your own to continue.</p>
+    <form id="pwForm" class="stack">
+      <label>Temporary password<input id="pwCurrent" type="password" autocomplete="current-password" required></label>
+      <label>New password (8+ characters)<input id="pwNew" type="password" autocomplete="new-password" minlength="8" required></label>
+      <p class="err" id="pwErr" hidden></p>
+      <button class="btn primary" type="submit">Save password</button>
+    </form>
+  </section>
+
+  <!-- my hours -->
+  <section id="v-me" class="view" hidden>
+    <div class="consent card" id="consentCard" hidden>
+      <h2>Automatic tracking notice</h2>
+      <p>If you accept, the desktop helper on your computer records <strong>when</strong> you are working, so you don't have to clock in by hand.</p>
+      <ul>
+        <li><strong>What is recorded:</strong> start and end times of activity on your computer (whether the keyboard or mouse was used in the last few minutes), and whether you are on the office network or working remotely.</li>
+        <li><strong>What is never recorded:</strong> keystrokes, screenshots, websites, apps, files or your exact GPS location.</li>
+        <li><strong>Who can see it:</strong> you, your manager and HR/admins.</li>
+        <li><strong>Your control:</strong> you can withdraw at any time on this page. You can always clock in and out by hand instead, and request corrections.</li>
+      </ul>
+      <div class="row-btns">
+        <button class="btn primary" id="consentYes">I accept automatic tracking</button>
+        <button class="btn" id="consentLater">Not now, I'll clock in by hand</button>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="card clock" id="clockCard">
+        <div class="clockhead">
+          <span class="state"><span class="dot"></span><span id="clockState">Not working</span></span>
+          <span class="pill" id="herePill"></span>
+        </div>
+        <div class="timer mono" id="timer">0:00:00</div>
+        <p class="muted small" id="clockSince"></p>
+        <input id="clockNote" type="text" maxlength="300" placeholder="Note (optional), e.g. client visit" aria-label="Note">
+        <button class="btn primary big" id="clockBtn">Clock in</button>
+      </div>
+      <div class="card">
+        <div class="totals">
+          <div><span class="lbl">Today</span><span class="big mono" id="sToday">0:00</span></div>
+          <div><span class="lbl">This week</span><span class="big mono" id="sWeek">0:00</span><span class="muted small" id="sTarget"></span></div>
+          <div><span class="lbl">This month</span><span class="big mono" id="sMonth">0:00</span></div>
+        </div>
+        <div class="progress" aria-hidden="true"><b id="sProgress"></b></div>
+        <div class="weekbars" id="weekBars"></div>
+        <div class="legend"><span><i class="sw office"></i>Office</span><span><i class="sw remote"></i>Remote</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardhead">
+        <h2>My entries</h2>
+        <div class="row-btns">
+          <button class="btn small" id="myPrev">← Prev week</button>
+          <span class="mono small" id="myRange"></span>
+          <button class="btn small" id="myNext">Next week →</button>
+          <button class="btn small" id="myExport">Export CSV</button>
+        </div>
+      </div>
+      <div class="tablewrap"><table id="myTable"></table></div>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <h2 id="corrTitle">Request a correction</h2>
+        <p class="muted small">Forgot to clock in, or a time is wrong? Your manager approves the change.</p>
+        <form id="corrForm" class="stack">
+          <input type="hidden" id="corrKind" value="add">
+          <input type="hidden" id="corrEntry" value="">
+          <div class="row3">
+            <label>Date<input id="corrDate" type="date" required></label>
+            <label>Start<input id="corrStart" type="time" required></label>
+            <label>End<input id="corrEnd" type="time" required></label>
+          </div>
+          <div class="row3">
+            <label>Break (min)<input id="corrBreak" type="number" min="0" step="5" value="0"></label>
+            <label>Location<select id="corrLoc"><option value="office">Office</option><option value="remote">Remote</option></select></label>
+          </div>
+          <label>Reason<input id="corrReason" type="text" maxlength="500" required placeholder="e.g. Forgot to clock in after lunch"></label>
+          <p class="err" id="corrErr" hidden></p>
+          <div class="row-btns">
+            <button class="btn primary" type="submit" id="corrSubmit">Send request</button>
+            <button class="btn" type="button" id="corrCancel" hidden>Cancel</button>
+          </div>
+        </form>
+        <h3>My requests</h3>
+        <div id="myCorrections" class="list"></div>
+      </div>
+
+      <div class="card">
+        <h2>My computers</h2>
+        <p class="muted small" id="trackStatus"></p>
+        <div id="deviceList" class="list"></div>
+        <button class="btn" id="pairBtn">Link a computer</button>
+        <div class="pairbox" id="pairBox" hidden>
+          <p>Run the desktop helper on your computer and enter this code. It works once and expires in 10 minutes.</p>
+          <div class="code mono" id="pairCode"></div>
+          <pre class="mono small">timetrack-agent pair --server <span id="pairServer"></span> --code <span id="pairCode2"></span></pre>
+        </div>
+        <button class="link" id="withdrawBtn" hidden>Withdraw consent and stop automatic tracking</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- team -->
+  <section id="v-team" class="view" hidden>
+    <div class="card">
+      <div class="cardhead"><h2>Right now</h2><span class="muted" id="liveCount"></span></div>
+      <div class="livegrid" id="liveGrid"></div>
+    </div>
+    <div class="card">
+      <div class="cardhead">
+        <h2>Requests waiting for you</h2>
+        <span class="pill warn" id="pendingCount" hidden></span>
+      </div>
+      <div id="pendingList" class="list"></div>
+    </div>
+    <div class="card">
+      <div class="cardhead">
+        <h2>Timesheet</h2>
+        <div class="row-btns">
+          <label class="inline">From<input id="tFrom" type="date"></label>
+          <label class="inline">To<input id="tTo" type="date"></label>
+          <label class="inline">Department<select id="tDept"><option value="">All</option></select></label>
+          <button class="btn small" id="tExportSum">Export summary CSV</button>
+          <button class="btn small" id="tExportAll">Export entries CSV</button>
+        </div>
+      </div>
+      <div class="tablewrap"><table id="teamTable"></table></div>
+      <div id="personDetail" hidden>
+        <div class="cardhead"><h3 id="personName"></h3><button class="link" id="personClose">Close</button></div>
+        <div class="tablewrap"><table id="personTable"></table></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- people (admin) -->
+  <section id="v-people" class="view" hidden>
+    <div class="grid2">
+      <div class="card">
+        <h2>Add a person</h2>
+        <form id="addForm" class="stack">
+          <div class="row3">
+            <label>Name<input id="aName" required></label>
+            <label>Work email<input id="aEmail" type="email" required></label>
+          </div>
+          <div class="row3">
+            <label>Employee code<input id="aCode"></label>
+            <label>Department<input id="aDept" list="deptList"></label>
+          </div>
+          <div class="row3">
+            <label>Role<select id="aRole"><option value="worker">Worker</option><option value="manager">Manager</option><option value="admin">Admin</option></select></label>
+            <label>Manager<select id="aManager"><option value="">None</option></select></label>
+          </div>
+          <p class="err" id="addErr" hidden></p>
+          <button class="btn primary" type="submit">Add person</button>
+        </form>
+      </div>
+      <div class="card">
+        <h2>Import many people</h2>
+        <p class="muted small">Paste a CSV with a header row: <code>email,name,employee_code,department,role,manager_email</code>. Roles: worker, manager, admin.</p>
+        <textarea id="importText" rows="6" placeholder="email,name,employee_code,department,role,manager_email&#10;bat@company.mn,Bat Erdene,E001,Engineering,worker,dorj@company.mn"></textarea>
+        <div class="row-btns"><button class="btn primary" id="importBtn">Import</button><label class="btn small filebtn">Load CSV file<input type="file" id="importFile" accept=".csv,text/csv" hidden></label></div>
+      </div>
+    </div>
+    <div class="card" id="passwordsCard" hidden>
+      <div class="cardhead"><h2>Temporary passwords</h2><button class="btn small" id="pwExport">Download as CSV</button></div>
+      <p class="muted small">Give each person their temporary password privately. They must change it at first sign-in. This list is shown only once.</p>
+      <div class="tablewrap"><table id="pwTable"></table></div>
+      <div id="importErrors" class="err"></div>
+    </div>
+    <div class="card">
+      <div class="cardhead"><h2>Everyone</h2><input id="peopleSearch" type="search" placeholder="Search name, email, department" aria-label="Search people"></div>
+      <div class="tablewrap"><table id="peopleTable"></table></div>
+    </div>
+    <datalist id="deptList"></datalist>
+  </section>
+
+  <section id="v-audit" class="view" hidden>
+    <div class="card">
+      <h2>Audit log</h2>
+      <p class="muted small">Every sign-up, consent, device link, approval, export and admin change.</p>
+      <div class="tablewrap"><table id="auditTable"></table></div>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
