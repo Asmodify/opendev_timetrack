@@ -1,0 +1,10 @@
+# Caddy site block for the time tracker. Caddy gets and renews the HTTPS certificate itself.
+# Point a DNS A record (e.g. time.opendevelopment.mn) at this server, then add this block to
+# /etc/caddy/Caddyfile and run: systemctl reload caddy
+#
+# APP_PORT here must match APP_PORT in /opt/timetrack/.env.
+
+time.opendevelopment.mn {
+    reverse_proxy 127.0.0.1:8000
+    encode gzip
+}
