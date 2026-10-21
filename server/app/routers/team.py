@@ -6,9 +6,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..common import correction_out, csv_response, date_range, entry_out, entry_rows, hours, iso, user_out
+from ..common import correction_out, csv_response, date_range, entry_out, entry_rows, hours, iso, leave_out, user_out
 from ..db import get_db
-from ..models import Correction, Device, Project, TimeEntry, User, utcnow
+from ..models import Correction, Device, LeaveRequest, Project, TimeEntry, User, utcnow
 from ..security import require_role
 from ..tracking import (audit, entries_between, local_day_bounds, open_entry, to_local, visible_users,
                         worked_seconds)
@@ -158,3 +158,40 @@ def reject(cid: int, body: ReviewIn, viewer: User = Depends(manager), db: Sessio
     audit(db, viewer, "correction_rejected", c.user, correction=c.id)
     db.commit()
     return correction_out(c)
+
+
+@router.get("/leave")
+def team_leave(status: str = "pending", viewer: User = Depends(manager), db: Session = Depends(get_db)):
+    ids = [i for i in _scope(db, viewer) if i != viewer.id or viewer.role == "admin"]
+    rows = db.scalars(select(LeaveRequest).where(LeaveRequest.user_id.in_(ids), LeaveRequest.status == status)
+                      .order_by(LeaveRequest.start_date.desc()).limit(200))
+    return [leave_out(r) for r in rows]
+
+
+def _review_leave(db: Session, viewer: User, lid: int) -> LeaveRequest:
+    r = db.get(LeaveRequest, lid)
+    if not r or r.user_id not in _scope(db, viewer):
+        raise HTTPException(404, "That request was not found.")
+    if r.user_id == viewer.id and viewer.role != "admin":
+        raise HTTPException(403, "Your own requests must be approved by your manager or an admin.")
+    if r.status != "pending":
+        raise HTTPException(409, "This request was already reviewed.")
+    return r
+
+
+@router.post("/leave/{lid}/approve")
+def approve_leave(lid: int, body: ReviewIn, viewer: User = Depends(manager), db: Session = Depends(get_db)):
+    r = _review_leave(db, viewer, lid)
+    r.status, r.reviewer_id, r.reviewer_note, r.reviewed_at = "approved", viewer.id, body.note, utcnow()
+    audit(db, viewer, "leave_approved", r.user, leave=r.id, type=r.type)
+    db.commit()
+    return leave_out(r)
+
+
+@router.post("/leave/{lid}/reject")
+def reject_leave(lid: int, body: ReviewIn, viewer: User = Depends(manager), db: Session = Depends(get_db)):
+    r = _review_leave(db, viewer, lid)
+    r.status, r.reviewer_id, r.reviewer_note, r.reviewed_at = "rejected", viewer.id, body.note, utcnow()
+    audit(db, viewer, "leave_rejected", r.user, leave=r.id)
+    db.commit()
+    return leave_out(r)

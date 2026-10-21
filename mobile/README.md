@@ -1,6 +1,6 @@
 # Time Tracking phone app
 
-Flutter app for Android and iOS. Workers see their day as a timeline, clock in and out, tag hours with projects, confirm automatic sessions and ask for corrections. With **office check-in** on, their hours start when they arrive at an office area and stop when they leave.
+Flutter app for Android and iOS. Workers see their day as a timeline, clock in and out, tag hours with projects, confirm automatic sessions, ask for corrections, and send time-off requests (the **Time off** tab: leave, sick days, work-from-home, overtime and more, with their yearly leave balance). With **office check-in** on, their hours start when they arrive at an office area and stop when they leave.
 
 ## How office check-in works
 

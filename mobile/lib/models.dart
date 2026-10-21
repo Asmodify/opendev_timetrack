@@ -77,15 +77,65 @@ class Entry {
       source;
 }
 
+class LeaveType {
+  LeaveType.fromJson(Map<String, dynamic> j)
+      : key = j['key'] as String,
+        label = j['label'] as String,
+        unit = j['unit'] as String,
+        paid = j['paid'] as bool;
+  final String key, label, unit;
+  final bool paid;
+  bool get hourly => unit == 'hours';
+}
+
+class LeaveRequest {
+  LeaveRequest.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as int,
+        type = j['type'] as String,
+        typeLabel = j['type_label'] as String,
+        unit = j['unit'] as String,
+        startDate = j['start_date'] as String,
+        endDate = j['end_date'] as String,
+        halfDay = j['half_day'] as bool,
+        hours = (j['hours'] as num).toDouble(),
+        days = (j['days'] as num).toDouble(),
+        reason = j['reason'] as String,
+        status = j['status'] as String,
+        reviewerNote = j['reviewer_note'] as String;
+  final int id;
+  final String type, typeLabel, unit, startDate, endDate, reason, status, reviewerNote;
+  final bool halfDay;
+  final double hours, days;
+
+  bool get hourly => unit == 'hours';
+  bool get cancellable => status == 'pending' || status == 'approved';
+  String get span {
+    if (hourly) return '${hours.toStringAsFixed(hours == hours.roundToDouble() ? 0 : 1)}h on $startDate';
+    final d = startDate == endDate ? startDate + (halfDay ? ' (half day)' : '') : '$startDate – $endDate';
+    return '$d · ${days == days.roundToDouble() ? days.toInt() : days} ${days == 1 ? 'day' : 'days'}';
+  }
+}
+
+class LeaveBalance {
+  LeaveBalance.fromJson(Map<String, dynamic> j)
+      : entitlement = (j['entitlement_days'] as num).toDouble(),
+        used = (j['used_days'] as num).toDouble(),
+        pending = (j['pending_days'] as num).toDouble(),
+        remaining = (j['remaining_days'] as num).toDouble();
+  final double entitlement, used, pending, remaining;
+}
+
 class Me {
   Me.fromJson(Map<String, dynamic> j)
       : user = User.fromJson(j['user'] as Map<String, dynamic>),
         company = j['company'] as String,
         here = j['here'] as String,
-        running = j['running'] == null ? null : Entry.fromJson(j['running'] as Map<String, dynamic>);
+        running = j['running'] == null ? null : Entry.fromJson(j['running'] as Map<String, dynamic>),
+        leaveTypes = [for (final t in (j['leave_types'] as List? ?? [])) LeaveType.fromJson(t as Map<String, dynamic>)];
   final User user;
   final String company, here;
   final Entry? running;
+  final List<LeaveType> leaveTypes;
 }
 
 class DayTotal {

@@ -136,6 +136,30 @@
         <button class="link" id="withdrawBtn" hidden>Withdraw consent and stop automatic tracking</button>
       </div>
     </div>
+
+    <div class="card">
+      <div class="cardhead">
+        <h2>Time off</h2>
+        <span class="muted small" id="leaveBalance"></span>
+      </div>
+      <p class="muted small">Request leave, a sick day, a day working from home, overtime and more. Your manager approves it.</p>
+      <form id="leaveForm" class="stack">
+        <div class="row3">
+          <label>Type<select id="lType"></select></label>
+          <label>From<input id="lStart" type="date" required></label>
+          <label>To<input id="lEnd" type="date" required></label>
+        </div>
+        <div class="row3">
+          <label class="inline" id="lHalfWrap"><input id="lHalf" type="checkbox"> Half day</label>
+          <label id="lHoursWrap" hidden>Hours<input id="lHours" type="number" min="0.5" max="24" step="0.5" value="2"></label>
+        </div>
+        <label>Reason (optional)<input id="lReason" type="text" maxlength="500" placeholder="e.g. family trip"></label>
+        <p class="err" id="leaveErr" hidden></p>
+        <button class="btn primary" type="submit">Send request</button>
+      </form>
+      <h3>My requests</h3>
+      <div id="myLeave" class="list"></div>
+    </div>
   </section>
 
   <!-- team -->
@@ -150,6 +174,13 @@
         <span class="pill warn" id="pendingCount" hidden></span>
       </div>
       <div id="pendingList" class="list"></div>
+    </div>
+    <div class="card">
+      <div class="cardhead">
+        <h2>Time-off requests</h2>
+        <span class="pill warn" id="leavePendingCount" hidden></span>
+      </div>
+      <div id="teamLeaveList" class="list"></div>
     </div>
     <div class="card">
       <div class="cardhead">

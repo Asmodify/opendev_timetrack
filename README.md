@@ -2,8 +2,8 @@
 
 The company's hour-tracking system for all staff, kept separate from the admin dashboard and the driver app.
 
-- **Workers** clock in and out from any browser or the phone app, or let it happen automatically: the desktop helper tracks computer use, and the phone app checks them in when they arrive at an office. They see their day as a timeline, tag hours with projects, confirm automatic sessions, export their hours and request corrections.
-- **Managers** see who is working right now, team timesheets (office vs remote, hours by project, unconfirmed sessions), and approve or reject corrections.
+- **Workers** clock in and out from any browser or the phone app, or let it happen automatically: the desktop helper tracks computer use, and the phone app checks them in when they arrive at an office. They see their day as a timeline, tag hours with projects, confirm automatic sessions, export their hours, request corrections, and send time-off requests (leave, sick days, work-from-home, overtime and more) with a yearly leave balance.
+- **Managers** see who is working right now, team timesheets (office vs remote, hours by project, unconfirmed sessions), and approve or reject corrections and time-off requests.
 - **Admins (HR)** add people one by one or import a CSV, set roles and managers, manage projects and office areas, reset passwords, export payroll CSVs and read the audit log.
 
 ## How automatic tracking works

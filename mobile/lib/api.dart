@@ -125,6 +125,17 @@ class Api {
 
   Future<void> requestCorrection(Map<String, Object?> body) => _send('POST', '/api/me/corrections', body);
 
+  Future<({LeaveBalance balance, List<LeaveRequest> requests})> leave() async {
+    final j = await _send('GET', '/api/me/leave') as Map<String, dynamic>;
+    return (
+      balance: LeaveBalance.fromJson(j['balance'] as Map<String, dynamic>),
+      requests: [for (final r in j['requests'] as List) LeaveRequest.fromJson(r as Map<String, dynamic>)],
+    );
+  }
+
+  Future<void> requestLeave(Map<String, Object?> body) => _send('POST', '/api/me/leave', body);
+  Future<void> cancelLeave(int id) => _send('POST', '/api/me/leave/$id/cancel');
+
   Future<Map<String, dynamic>> presence(String event, int officeId) async =>
       Map<String, dynamic>.from(await _send('POST', '/api/agent/presence', {'event': event, 'office_id': officeId}));
 }

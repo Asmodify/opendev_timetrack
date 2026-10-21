@@ -6,11 +6,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..common import (correction_out, csv_response, date_range, entry_out, entry_rows, iso, office_out,
-                      project_out, to_utc_naive, user_out)
+from ..common import (correction_out, csv_response, date_range, entry_out, entry_rows, iso, leave_days,
+                      leave_out, office_out, project_out, to_utc_naive, user_out)
 from ..config import settings
 from ..db import get_db
-from ..models import LOCATIONS, Correction, Device, OfficeLocation, PairingCode, Project, TimeEntry, User, utcnow
+from ..models import (LEAVE_TYPES, LOCATIONS, Correction, Device, LeaveRequest, OfficeLocation, PairingCode,
+                      Project, TimeEntry, User, utcnow)
 from ..security import current_user, hash_token
 from ..tracking import (audit, client_ip, close_entry, entries_between, local_day_bounds, local_today,
                         location_for, open_entry, start_entry, week_start, worked_seconds)
@@ -43,6 +44,15 @@ class PhoneIn(BaseModel):
     platform: str = Field("", max_length=64)
 
 
+class LeaveIn(BaseModel):
+    type: str
+    start_date: date
+    end_date: date
+    half_day: bool = False
+    hours: float = Field(0, ge=0, le=24)
+    reason: str = Field("", max_length=500)
+
+
 class CorrectionIn(BaseModel):
     kind: str = Field(pattern="^(add|edit|delete)$")
     entry_id: int | None = None
@@ -64,6 +74,7 @@ def me(request: Request, user: User = Depends(current_user), db: Session = Depen
         "idle_timeout_minutes": settings.idle_timeout_minutes,
         "here": location_for(client_ip(request)),
         "running": entry_out(entry) if entry else None,
+        "leave_types": [{"key": k, **v} for k, v in LEAVE_TYPES.items()],
     }
 
 
@@ -249,6 +260,69 @@ def request_correction(body: CorrectionIn, user: User = Depends(current_user), d
     audit(db, user, "correction_requested", user, kind=body.kind)
     db.commit()
     return correction_out(c)
+
+
+def _leave_balance(db: Session, user: User) -> dict:
+    """Annual-leave entitlement and how much is used or pending this calendar year."""
+    year = local_today().year
+    rows = db.scalars(select(LeaveRequest).where(LeaveRequest.user_id == user.id, LeaveRequest.type == "annual",
+                                                 LeaveRequest.status.in_(("approved", "pending"))))
+    used = pending = 0.0
+    for r in rows:
+        if r.start_date.year != year:
+            continue
+        if r.status == "approved":
+            used += leave_days(r)
+        else:
+            pending += leave_days(r)
+    return {"year": year, "entitlement_days": user.annual_leave_days, "used_days": round(used, 1),
+            "pending_days": round(pending, 1), "remaining_days": round(user.annual_leave_days - used, 1)}
+
+
+@router.get("/leave")
+def my_leave(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    rows = db.scalars(select(LeaveRequest).where(LeaveRequest.user_id == user.id)
+                      .order_by(LeaveRequest.created_at.desc()).limit(100))
+    return {"balance": _leave_balance(db, user), "requests": [leave_out(r) for r in rows]}
+
+
+@router.post("/leave")
+def request_leave(body: LeaveIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if body.type not in LEAVE_TYPES:
+        raise HTTPException(400, "Unknown request type.")
+    meta = LEAVE_TYPES[body.type]
+    if body.end_date < body.start_date:
+        raise HTTPException(400, "The end date is before the start date.")
+    if (body.end_date - body.start_date).days > 366:
+        raise HTTPException(400, "That date range is too long.")
+    if meta["unit"] == "hours":
+        if body.hours <= 0:
+            raise HTTPException(400, "Enter the number of hours.")
+        if body.start_date != body.end_date:
+            raise HTTPException(400, "Hour-based requests are for a single day.")
+    if body.half_day and body.start_date != body.end_date:
+        raise HTTPException(400, "A half day applies to a single day only.")
+    req = LeaveRequest(user_id=user.id, type=body.type, start_date=body.start_date, end_date=body.end_date,
+                       half_day=body.half_day and meta["unit"] == "day", hours=body.hours if meta["unit"] == "hours" else 0.0,
+                       reason=body.reason.strip())
+    db.add(req)
+    audit(db, user, "leave_requested", user, type=body.type,
+          start=body.start_date.isoformat(), end=body.end_date.isoformat())
+    db.commit()
+    return leave_out(req)
+
+
+@router.post("/leave/{leave_id}/cancel")
+def cancel_leave(leave_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    req = db.get(LeaveRequest, leave_id)
+    if not req or req.user_id != user.id:
+        raise HTTPException(404, "That request was not found.")
+    if req.status not in ("pending", "approved"):
+        raise HTTPException(409, "This request can no longer be cancelled.")
+    req.status = "cancelled"
+    audit(db, user, "leave_cancelled", user, leave=req.id)
+    db.commit()
+    return leave_out(req)
 
 
 @router.post("/pairing-code")

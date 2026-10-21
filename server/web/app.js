@@ -110,12 +110,15 @@ async function loadMine() {
   $("#herePill").textContent = state.me.here === "office" ? "On office network" : "Working remotely";
   $("#herePill").className = "pill " + state.me.here;
   state.projects = await api("/api/me/projects").catch(() => []);
-  const [summary, entries, corrections, devices] = await Promise.all([
+  fillLeaveTypes();
+  const [summary, entries, corrections, devices, leave] = await Promise.all([
     api("/api/me/summary"), loadMyEntries(), api("/api/me/corrections"), api("/api/me/devices"),
+    api("/api/me/leave").catch(() => null),
   ]).catch((e) => { toast(e.message); return []; });
   if (summary) renderSummary(summary);
   if (corrections) renderMyCorrections(corrections);
   if (devices) renderDevices(devices);
+  if (leave) renderMyLeave(leave);
 }
 
 function renderClock() {
@@ -257,6 +260,56 @@ $("#withdrawBtn").addEventListener("click", async (ev) => {
   try { await api("/api/me/consent", { method: "POST", body: { accept: false } }); sessionStorage.setItem("tt-consent-later", "1"); toast("Automatic tracking stopped"); loadMine(); } catch (e) { toast(e.message); }
 });
 
+/* ---------- time off ---------- */
+function leaveTypes() { return (state.me && state.me.leave_types) || []; }
+function fillLeaveTypes() {
+  const sel = $("#lType");
+  if (!sel || sel.dataset.filled === "1") return;
+  sel.innerHTML = leaveTypes().map((t) => `<option value="${t.key}">${esc(t.label)}</option>`).join("");
+  sel.dataset.filled = "1";
+  updateLeaveFields();
+}
+function updateLeaveFields() {
+  const t = leaveTypes().find((x) => x.key === $("#lType").value);
+  const hourly = t && t.unit === "hours";
+  $("#lHoursWrap").hidden = !hourly;
+  $("#lHalfWrap").hidden = !!hourly;
+  if (hourly) { $("#lEnd").value = $("#lStart").value; }
+}
+function leaveText(r) {
+  if (r.unit === "hours") return `${r.type_label}: ${r.hours}h on ${r.start_date}`;
+  const span = r.start_date === r.end_date ? r.start_date + (r.half_day ? " (half day)" : "") : `${r.start_date} – ${r.end_date}`;
+  return `${r.type_label}: ${span} · ${r.days} ${r.days === 1 ? "day" : "days"}`;
+}
+function renderMyLeave(data) {
+  const b = data.balance;
+  $("#leaveBalance").textContent = `Annual leave: ${b.remaining_days} of ${b.entitlement_days} days left${b.pending_days ? " · " + b.pending_days + " pending" : ""}`;
+  const rows = data.requests || [];
+  $("#myLeave").innerHTML = rows.length ? rows.slice(0, 10).map((r) => `<div class="item"><div class="top"><b>${esc(leaveText(r))}</b>${statusPill(r.status)}</div>
+    <span class="small muted">${r.reason ? esc(r.reason) + " · " : ""}${r.reviewer_note ? "Manager: " + esc(r.reviewer_note) + " · " : ""}${(r.status === "pending" || r.status === "approved") ? `<button class="link" data-cancel-leave="${r.id}">Cancel</button>` : ""}</span></div>`).join("") : `<div class="empty small">No requests yet.</div>`;
+}
+$("#lType").addEventListener("change", updateLeaveFields);
+$("#lStart").addEventListener("change", () => { if (!$("#lEnd").value || $("#lEnd").value < $("#lStart").value) $("#lEnd").value = $("#lStart").value; });
+$("#leaveForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  showErr($("#leaveErr"), "");
+  const t = leaveTypes().find((x) => x.key === $("#lType").value);
+  const body = { type: $("#lType").value, start_date: $("#lStart").value, end_date: $("#lEnd").value,
+    half_day: !$("#lHalfWrap").hidden && $("#lHalf").checked, hours: t && t.unit === "hours" ? Number($("#lHours").value) : 0,
+    reason: $("#lReason").value };
+  try {
+    await api("/api/me/leave", { method: "POST", body });
+    toast("Request sent to your manager");
+    $("#lReason").value = ""; $("#lHalf").checked = false;
+    renderMyLeave(await api("/api/me/leave"));
+  } catch (e) { showErr($("#leaveErr"), e.message); }
+});
+$("#myLeave").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("[data-cancel-leave]"); if (!b) return;
+  if (b.dataset.confirm !== "1") { b.dataset.confirm = "1"; b.textContent = "Confirm cancel"; return; }
+  try { await api(`/api/me/leave/${b.dataset.cancelLeave}/cancel`, { method: "POST" }); toast("Request cancelled"); renderMyLeave(await api("/api/me/leave")); } catch (e) { toast(e.message); }
+});
+
 /* ---------- team ---------- */
 function teamRange() {
   if (!$("#tFrom").value) { const ws = weekStart(0); $("#tFrom").value = ymd(ws); $("#tTo").value = ymd(addDays(ws, 6)); }
@@ -265,7 +318,7 @@ function teamRange() {
 }
 async function loadTeam() {
   try {
-    const [live, summary, pending] = await Promise.all([api("/api/team/live"), api("/api/team/summary?" + teamRange()), api("/api/team/corrections")]);
+    const [live, summary, pending, leave] = await Promise.all([api("/api/team/live"), api("/api/team/summary?" + teamRange()), api("/api/team/corrections"), api("/api/team/leave").catch(() => [])]);
     $("#liveCount").textContent = live.working + " of " + live.total + " working";
     $("#liveGrid").innerHTML = live.people.map((p) => `<div class="person${p.working ? "" : " off"}"><b>${esc(p.user.name)}</b>
       <span class="small muted">${esc(p.user.department || "")}</span>
@@ -279,8 +332,18 @@ async function loadTeam() {
     $("#pendingList").innerHTML = pending.length ? pending.map((c) => `<div class="item"><div class="top"><b>${esc(c.user_name)}: ${esc(correctionText(c))}</b>
       <span class="row-btns"><button class="btn small primary" data-approve="${c.id}">Approve</button><button class="btn small danger" data-reject="${c.id}">Reject</button></span></div>
       <span class="small muted">${esc(c.reason)} · asked ${dayName(d(c.created_at))}</span></div>`).join("") : `<div class="empty small">Nothing waiting. Corrections from your team appear here.</div>`;
+    $("#leavePendingCount").hidden = !leave.length; $("#leavePendingCount").textContent = leave.length + " waiting";
+    $("#teamLeaveList").innerHTML = leave.length ? leave.map((r) => `<div class="item"><div class="top"><b>${esc(r.user_name)}: ${esc(leaveText(r))}</b>
+      <span class="row-btns"><button class="btn small primary" data-leave-approve="${r.id}">Approve</button><button class="btn small danger" data-leave-reject="${r.id}">Reject</button></span></div>
+      ${r.reason ? `<span class="small muted">${esc(r.reason)}</span>` : ""}</div>`).join("") : `<div class="empty small">Nothing waiting. Time-off requests from your team appear here.</div>`;
   } catch (e) { toast(e.message); }
 }
+$("#teamLeaveList").addEventListener("click", async (ev) => {
+  const a = ev.target.closest("[data-leave-approve]"), r = ev.target.closest("[data-leave-reject]");
+  const b = a || r; if (!b) return;
+  const id = (a || r).dataset.leaveApprove || (a || r).dataset.leaveReject;
+  try { await api(`/api/team/leave/${id}/${a ? "approve" : "reject"}`, { method: "POST", body: { note: "" } }); toast(a ? "Approved" : "Rejected"); loadTeam(); } catch (e) { toast(e.message); }
+});
 function renderTeamTable(rows) {
   $("#teamTable").innerHTML = rows.length ? `<thead><tr><th>Name</th><th>Code</th><th>Department</th><th class="n">Office</th><th class="n">Remote</th><th class="n">Total</th><th class="n">Target</th><th class="n">Days</th><th></th></tr></thead><tbody>` +
     rows.map((r) => {

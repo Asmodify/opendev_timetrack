@@ -35,6 +35,7 @@ class UserPatch(BaseModel):
     clear_manager: bool = False
     active: bool | None = None
     weekly_target_hours: float | None = Field(None, ge=0, le=100)
+    annual_leave_days: float | None = Field(None, ge=0, le=365)
 
 
 class ProjectIn(BaseModel):
@@ -147,7 +148,7 @@ def update_user(user_id: int, body: UserPatch, actor: User = Depends(admin), db:
         if body.manager_id == u.id or not db.get(User, body.manager_id):
             raise HTTPException(400, "Pick a different manager.")
         u.manager_id = body.manager_id
-    for field in ("name", "employee_code", "department", "weekly_target_hours"):
+    for field in ("name", "employee_code", "department", "weekly_target_hours", "annual_leave_days"):
         value = getattr(body, field)
         if value is not None:
             setattr(u, field, value)

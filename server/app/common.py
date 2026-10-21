@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from fastapi.responses import Response
 
 from .config import settings
-from .models import Correction, TimeEntry, User
+from .models import LEAVE_TYPES, Correction, LeaveRequest, TimeEntry, User
 from .tracking import local_day_bounds, local_today, to_local, week_start, worked_seconds
 
 
@@ -37,7 +37,8 @@ def user_out(u: User) -> dict:
         "id": u.id, "email": u.email, "name": u.name, "employee_code": u.employee_code,
         "department": u.department, "role": u.role, "manager_id": u.manager_id,
         "manager_name": u.manager.name if u.manager else None, "active": u.active,
-        "weekly_target_hours": u.weekly_target_hours, "must_change_password": u.must_change_password,
+        "weekly_target_hours": u.weekly_target_hours, "annual_leave_days": u.annual_leave_days,
+        "must_change_password": u.must_change_password,
         "consent": u.consent_version == settings.consent_version, "consent_at": iso(u.consent_at),
     }
 
@@ -67,6 +68,29 @@ def correction_out(c: Correction) -> dict:
         "start": iso(c.start), "end": iso(c.end), "break_minutes": c.break_minutes, "location": c.location,
         "reason": c.reason, "status": c.status, "reviewer_note": c.reviewer_note,
         "reviewed_at": iso(c.reviewed_at), "created_at": iso(c.created_at),
+    }
+
+
+def leave_days(req: LeaveRequest) -> float:
+    """How much time off a day-based request covers, counting calendar days inclusively.
+
+    A half-day request is 0.5. Hour-based types (overtime) return 0 here; use req.hours instead.
+    """
+    if LEAVE_TYPES.get(req.type, {}).get("unit") == "hours":
+        return 0.0
+    days = (req.end_date - req.start_date).days + 1
+    return 0.5 if req.half_day and days == 1 else float(days)
+
+
+def leave_out(req: LeaveRequest) -> dict:
+    meta = LEAVE_TYPES.get(req.type, {"label": req.type, "unit": "day", "paid": False})
+    return {
+        "id": req.id, "user_id": req.user_id, "user_name": req.user.name if req.user else None,
+        "type": req.type, "type_label": meta["label"], "unit": meta["unit"], "paid": meta["paid"],
+        "start_date": req.start_date.isoformat(), "end_date": req.end_date.isoformat(),
+        "half_day": req.half_day, "hours": req.hours, "days": leave_days(req), "reason": req.reason,
+        "status": req.status, "reviewer_note": req.reviewer_note, "reviewed_at": iso(req.reviewed_at),
+        "created_at": iso(req.created_at),
     }
 
 

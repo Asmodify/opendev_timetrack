@@ -23,4 +23,22 @@ void main() {
   test('builds dates for the API', () {
     expect(ymd(DateTime(2026, 3, 7)), '2026-03-07');
   });
+
+  test('describes a leave request for the list', () {
+    final multi = LeaveRequest.fromJson({
+      'id': 1, 'type': 'annual', 'type_label': 'Annual leave', 'unit': 'day',
+      'start_date': '2026-11-02', 'end_date': '2026-11-04', 'half_day': false, 'hours': 0.0,
+      'days': 3.0, 'reason': 'Trip', 'status': 'pending', 'reviewer_note': '',
+    });
+    expect(multi.span, '2026-11-02 – 2026-11-04 · 3 days');
+    expect(multi.cancellable, isTrue);
+
+    final overtime = LeaveRequest.fromJson({
+      'id': 2, 'type': 'overtime', 'type_label': 'Overtime', 'unit': 'hours',
+      'start_date': '2026-11-02', 'end_date': '2026-11-02', 'half_day': false, 'hours': 2.5,
+      'days': 0.0, 'reason': '', 'status': 'rejected', 'reviewer_note': 'No',
+    });
+    expect(overtime.span, '2.5h on 2026-11-02');
+    expect(overtime.cancellable, isFalse);
+  });
 }

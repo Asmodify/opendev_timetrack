@@ -1,6 +1,7 @@
+from datetime import date as date_
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -13,6 +14,20 @@ def utcnow() -> datetime:
 
 ROLES = ("worker", "manager", "admin")
 LOCATIONS = ("office", "remote")
+
+# Kinds of time-off / schedule request a worker can send, like Timely's "цагийн хүсэлт".
+# "paid" leave types count against the yearly balance; the others don't.
+LEAVE_TYPES: dict[str, dict] = {
+    "annual": {"label": "Annual leave", "unit": "day", "paid": True},
+    "sick": {"label": "Sick leave", "unit": "day", "paid": True},
+    "unpaid": {"label": "Unpaid leave", "unit": "day", "paid": False},
+    "remote": {"label": "Work from home", "unit": "day", "paid": False},
+    "business_trip": {"label": "Business trip", "unit": "day", "paid": False},
+    "family": {"label": "Family / compassionate", "unit": "day", "paid": True},
+    "study": {"label": "Study leave", "unit": "day", "paid": False},
+    "overtime": {"label": "Overtime", "unit": "hours", "paid": False},
+    "other": {"label": "Other", "unit": "day", "paid": False},
+}
 
 
 class User(Base):
@@ -29,6 +44,7 @@ class User(Base):
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     weekly_target_hours: Mapped[float] = mapped_column(Float, default=40.0)
+    annual_leave_days: Mapped[float] = mapped_column(Float, default=15.0)  # paid annual-leave entitlement per year
     consent_version: Mapped[str | None] = mapped_column(String(32))
     consent_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -130,6 +146,32 @@ class Correction(Base):
     location: Mapped[str | None] = mapped_column(String(16))
     reason: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)  # pending | approved | rejected
+    reviewer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    reviewer_note: Mapped[str] = mapped_column(Text, default="")
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+
+
+class LeaveRequest(Base):
+    """A worker's request for time off or a schedule change (leave, sick, remote day, overtime...).
+
+    A manager approves or rejects it. This is about intended/planned time, separate from a
+    Correction, which fixes hours that were or weren't recorded. Nobody approves their own.
+    """
+
+    __tablename__ = "leave_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    type: Mapped[str] = mapped_column(String(24), index=True)  # a key of LEAVE_TYPES
+    start_date: Mapped[date_] = mapped_column(Date, index=True)
+    end_date: Mapped[date_] = mapped_column(Date, index=True)  # inclusive; equals start_date for one day
+    half_day: Mapped[bool] = mapped_column(Boolean, default=False)  # a half day off (day-based types)
+    hours: Mapped[float] = mapped_column(Float, default=0.0)  # for hour-based types like overtime
+    reason: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)  # pending|approved|rejected|cancelled
     reviewer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     reviewer_note: Mapped[str] = mapped_column(Text, default="")
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)

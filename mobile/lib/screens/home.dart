@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../models.dart';
+import 'leave.dart';
 import 'password.dart';
 import 'settings.dart';
 import 'today.dart';
@@ -85,6 +86,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final pages = [
       TodayPage(key: ValueKey('today$_refresh'), me: me, projects: _projects, onChanged: _load),
       WeekPage(key: ValueKey('week$_refresh'), me: me),
+      LeavePage(key: ValueKey('leave$_refresh'), me: me),
       SettingsPage(me: me, onChanged: _load, onSignOut: widget.onSignedOut),
     ];
     return Scaffold(
@@ -96,6 +98,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.today_outlined), selectedIcon: Icon(Icons.today), label: 'Day'),
           NavigationDestination(icon: Icon(Icons.bar_chart_outlined), selectedIcon: Icon(Icons.bar_chart), label: 'Week'),
+          NavigationDestination(icon: Icon(Icons.event_note_outlined), selectedIcon: Icon(Icons.event_note), label: 'Time off'),
           NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
