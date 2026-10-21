@@ -25,9 +25,26 @@ cp .env.example .env        # fill in SECRET_KEY, POSTGRES_PASSWORD, OFFICE_NETW
 docker compose up -d --build
 ```
 
-Open `http://SERVER:8000`, sign in as `FIRST_ADMIN_EMAIL`, change the password, then import staff under **People**. Put it behind HTTPS (nginx, Caddy or your load balancer) before anyone signs in from outside the office, and keep `TRUST_PROXY=true` only when that proxy sets `X-Forwarded-For`.
+The app listens on **localhost only** (`127.0.0.1:APP_PORT`), so a reverse proxy in front provides HTTPS. Sign in as `FIRST_ADMIN_EMAIL`, change the password, then import staff under **People**. Keep `TRUST_PROXY=true` only when that proxy sets `X-Forwarded-For`.
 
 To find the office's public IP for `OFFICE_NETWORKS`, open https://ifconfig.me from an office computer.
+
+### Deploy beside other apps on one server
+
+This is how it runs on a shared Docker host (for example next to other compose projects in `/opt`):
+
+```bash
+git clone -b feature/time-tracking-system https://github.com/Asmodify/opendev_timetrack.git /opt/timetrack
+cd /opt/timetrack && cp .env.example .env
+# In .env: set SECRET_KEY, POSTGRES_PASSWORD (and the same password in DATABASE_URL),
+# FIRST_ADMIN_*, OFFICE_NETWORKS, and an APP_PORT that is free on this server.
+docker compose up -d --build
+curl -s http://127.0.0.1:$APP_PORT/healthz        # {"ok":true}
+```
+
+Then point a DNS record at the server and add the site block from [deploy/Caddyfile.example](deploy/Caddyfile.example) to `/etc/caddy/Caddyfile`; Caddy obtains the certificate itself. Until a domain exists, reach it over an SSH tunnel: `ssh -L 8000:127.0.0.1:APP_PORT root@SERVER` then open `http://localhost:8000`.
+
+The database lives in the `pgdata` volume. Back it up with `docker compose exec db pg_dump -U timetrack timetrack > backup.sql`.
 
 ### Local development
 
